@@ -41,6 +41,7 @@
 #include <linux/mm_inline.h>
 #include <linux/numa.h>
 
+#include "kcompressd.h"
 #include "zram_drv.h"
 
 static DEFINE_IDR(zram_index_idr);
@@ -1904,6 +1905,15 @@ static void __zram_make_request(struct zram *zram, struct bio *bio)
 	bio_endio(bio);
 }
 
+#if IS_ENABLED(CONFIG_KCOMPRESSD)
+static void zram_bio_write_callback(void *mem, struct bio *bio)
+{
+	struct zram *zram = (struct zram *)mem;
+
+	zram_bio_write(zram, bio);
+}
+#endif
+
 /*
  * Handler function for all zram I/O requests.
  */
@@ -1916,6 +1926,25 @@ static void zram_submit_bio(struct bio *bio)
 		atomic64_inc(&zram->stats.invalid_io);
 		bio_io_error(bio);
 		return;
+	}
+	switch (bio_op(bio)) {
+	case REQ_OP_READ:
+		zram_bio_read(zram, bio);
+		break;
+	case REQ_OP_WRITE:
+#if IS_ENABLED(CONFIG_KCOMPRESSD)
+		if (kcompressd_enabled() && !schedule_bio_write(zram, bio, zram_bio_write_callback))
+			break;
+#endif
+		zram_bio_write(zram, bio);
+		break;
+	case REQ_OP_DISCARD:
+	case REQ_OP_WRITE_ZEROES:
+		zram_bio_discard(zram, bio);
+		break;
+	default:
+		WARN_ON_ONCE(1);
+		bio_endio(bio);
 	}
 
 	__zram_make_request(zram, bio);
