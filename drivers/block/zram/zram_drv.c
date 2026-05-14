@@ -1927,6 +1927,7 @@ static void zram_submit_bio(struct bio *bio)
 		bio_io_error(bio);
 		return;
 	}
+
 	switch (bio_op(bio)) {
 	case REQ_OP_READ:
 		zram_bio_read(zram, bio);
