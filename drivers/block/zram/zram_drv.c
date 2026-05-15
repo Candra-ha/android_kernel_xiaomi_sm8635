@@ -1909,6 +1909,8 @@ static void zram_bio_read(struct zram *zram, struct bio *bio);
 
 static void zram_bio_write(struct zram *zram, struct bio *bio);
 
+static void zram_bio_discard_c(struct zram *zram, struct bio *bio);
+
 #if IS_ENABLED(CONFIG_KCOMPRESSD)
 static void zram_bio_write_callback(void *mem, struct bio *bio)
 {
@@ -1945,7 +1947,7 @@ static void zram_submit_bio(struct bio *bio)
 		break;
 	case REQ_OP_DISCARD:
 	case REQ_OP_WRITE_ZEROES:
-		zram_bio_discard(zram, index, offset, bio);
+		zram_bio_discard_c(zram, bio);
 		break;
 	default:
 		WARN_ON_ONCE(1);
