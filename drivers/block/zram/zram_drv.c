@@ -1909,8 +1909,6 @@ static void zram_bio_read(struct zram *zram, struct bio *bio);
 
 static void zram_bio_write(struct zram *zram, struct bio *bio);
 
-static void zram_bio_discard(struct zram *zram, struct bio *bio);
-
 #if IS_ENABLED(CONFIG_KCOMPRESSD)
 static void zram_bio_write_callback(void *mem, struct bio *bio)
 {
