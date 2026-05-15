@@ -1945,7 +1945,7 @@ static void zram_submit_bio(struct bio *bio)
 		break;
 	case REQ_OP_DISCARD:
 	case REQ_OP_WRITE_ZEROES:
-		zram_bio_discard(zram, bio);
+		zram_bio_discard(zram, index, offset, bio);
 		break;
 	default:
 		WARN_ON_ONCE(1);
