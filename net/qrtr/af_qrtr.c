@@ -663,8 +663,9 @@ static void qrtr_tx_flow_failed(struct qrtr_node *node, int dest_node,
 	struct qrtr_tx_flow *flow;
 
 	mutex_lock(&node->qrtr_tx_lock);
-	flow = xa_load(&node->qrtr_tx_flow, key);
+	flow = radix_tree_lookup(&node->qrtr_tx_flow, key);
 	mutex_unlock(&node->qrtr_tx_lock);
+	flow = xa_load(&node->qrtr_tx_flow, key);
 	if (flow) {
 		spin_lock_irq(&flow->lock);
 		flow->tx_failed = 1;
