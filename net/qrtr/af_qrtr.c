@@ -533,6 +533,7 @@ static void qrtr_tx_resume(struct qrtr_node *node, struct sk_buff *skb)
 		}
 		sock_put(waiter->sk);
 		kfree(waiter);
+	}
 	flow = xa_load(&node->qrtr_tx_flow, key);
 	if (flow) {
 		spin_lock(&flow->resume_tx.lock);
