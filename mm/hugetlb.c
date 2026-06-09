@@ -7161,8 +7161,7 @@ int huge_pmd_unshare(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		return 0;
 
 	pud_clear(pud);
-	tlb_unshare_pmd_ptdesc(tlb, virt_to_page(ptep), addr);
-
+	put_page(virt_to_page(ptep));
 	mm_dec_nr_pmds(mm);
 	return 1;
 }
