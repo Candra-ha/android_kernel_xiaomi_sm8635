@@ -1631,7 +1631,7 @@ next_dnode:
 	if (map->m_may_create) {
 		if (f2fs_lfs_mode(sbi))
 			f2fs_balance_fs(sbi, true);
-		f2fs_do_map_lock(sbi, flag, true);
+		f2fs_map_lock(sbi, flag, true);
 	}
 
 	/* When reading holes, we need its node page */
