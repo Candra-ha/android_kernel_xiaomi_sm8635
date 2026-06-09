@@ -1403,7 +1403,6 @@ static void z_erofs_decompress_kickoff(struct z_erofs_decompressqueue *io,
 				       int bios)
 {
 	struct erofs_sb_info *const sbi = EROFS_SB(io->sb);
-	int gfp_flag;
 
 	/* wake up the caller thread for sync decompression */
 	if (io->sync) {
@@ -1437,9 +1436,7 @@ static void z_erofs_decompress_kickoff(struct z_erofs_decompressqueue *io,
 			sbi->opt.sync_decompress = EROFS_SYNC_DECOMPRESS_FORCE_ON;
 		return;
 	}
-	gfp_flag = memalloc_noio_save();
 	z_erofs_decompressqueue_work(&io->u.work);
-	memalloc_noio_restore(gfp_flag);
 }
 
 static void z_erofs_fill_bio_vec(struct bio_vec *bvec,
@@ -1499,13 +1496,10 @@ repeat:
 	DBG_BUGON(justfound && PagePrivate(page));
 
 	/* the cached page is still in managed cache */
-	if (likely(page->mapping == mc)) {
-		WRITE_ONCE(pcl->compressed_bvecs[nr].page, page);
-		oldpage = page;
-
+	if (page->mapping == mc) {
 		/*
-		 * The cached folio is still in managed cache but without
-		 * a valid `->private` pcluster hint.  Let's reconnect them.
+		 * The cached page is still available but without a valid
+		 * `->private` pcluster hint.  Let's reconnect them.
 		 */
 		if (!PagePrivate(page)) {
 			DBG_BUGON(!justfound);
@@ -1514,25 +1508,22 @@ repeat:
 			put_page(page);
 		}
 
-		if (likely(page->private == (unsigned long)pcl)) {
-			/* don't submit cache I/Os again if already uptodate */
-			if (PageUptodate(page)) {
-				unlock_page(page);
-				page = NULL;
-
-			}
-			goto out;
+		/* no need to submit if it is already up-to-date */
+		if (PageUptodate(page)) {
+			unlock_page(page);
+			bvec->bv_page = NULL;
 		}
-		/*
-		 * Already linked with another pcluster, which only appears in
-		 * crafted images by fuzzers for now.  But handle this anyway.
-		 */
-		tocache = false;	/* use temporary short-lived pages */
-	} else {
-		DBG_BUGON(1); /* referenced managed folios can't be truncated */
-		tocache = true;
+		return;
 	}
 
+	/*
+	 * It has been truncated, so it's unsafe to reuse this one. Let's
+	 * allocate a new page for compressed data.
+	 */
+	DBG_BUGON(page->mapping);
+	DBG_BUGON(!justfound);
+
+	tocache = true;
 	unlock_page(page);
 	put_page(page);
 out_allocpage:
@@ -1691,11 +1682,10 @@ static void z_erofs_submit_queue(struct z_erofs_decompress_frontend *f,
 			z_erofs_fill_bio_vec(&bvec, f, pcl, i++, mc);
 			if (!bvec.bv_page)
 				continue;
-			struct page *page = NULL;
 
 			if (bio && (cur != last_pa ||
 				    last_bdev != mdev.m_bdev)) {
-drain_io:
+submit_bio_retry:
 				submit_bio(bio);
 				if (memstall) {
 					psi_memstall_leave(&pflags);
@@ -1704,14 +1694,8 @@ drain_io:
 				bio = NULL;
 			}
 
-			if (!page) {
-				page = pickup_page_for_submission(pcl, i++,
-						&f->pagepool, mc);
-				if (!page)
-					continue;
-			}
-
-			if (unlikely(PageWorkingset(page)) && !memstall) {
+			if (unlikely(PageWorkingset(bvec.bv_page)) &&
+			    !memstall) {
 				psi_memstall_enter(&pflags);
 				memstall = 1;
 			}
@@ -1731,8 +1715,9 @@ drain_io:
 			if (cur + bvec.bv_len > end)
 				bvec.bv_len = end - cur;
 			DBG_BUGON(bvec.bv_len < sb->s_blocksize);
-			if (bio_add_page(bio, page, PAGE_SIZE, 0) < PAGE_SIZE)
-				goto drain_io;
+			if (!bio_add_page(bio, bvec.bv_page, bvec.bv_len,
+					  bvec.bv_offset))
+				goto submit_bio_retry;
 
 			last_pa = cur + bvec.bv_len;
 			bypass = false;
@@ -1744,10 +1729,11 @@ drain_io:
 			move_to_bypass_jobqueue(pcl, qtail, owned_head);
 	} while (owned_head != Z_EROFS_PCLUSTER_TAIL);
 
-	if (bio)
+	if (bio) {
 		submit_bio(bio);
-	if (memstall)
-		psi_memstall_leave(&pflags);
+		if (memstall)
+			psi_memstall_leave(&pflags);
+	}
 
 	/*
 	 * although background is preferred, no one is pending for submission.
